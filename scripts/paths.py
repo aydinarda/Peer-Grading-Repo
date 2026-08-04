@@ -117,6 +117,14 @@ def semester_file() -> Path:
     return inputs() / "semester.csv"
 
 
+def rubric_file() -> Path:
+    return inputs() / "rubric.csv"
+
+
+def mail_template_file() -> Path:
+    return inputs() / "mail_template.txt"
+
+
 def marker_file() -> Path:
     """Records that a semester has been closed, so it is only announced once."""
     return outputs() / "semester_closed.txt"

@@ -1,4 +1,6 @@
-# ===== secrets =====
+# ===== local machine config =====
+# Written by scripts/setup_local.py; the path differs on every machine.
+.peergrading.json
 .env
 *.env
 
@@ -10,19 +12,20 @@ __pycache__/
 .venv/
 venv/
 
-# ===== outputs & logs =====
-outputs/*
-!outputs/.gitkeep
+# ===== course data =====
+# Inputs and outputs live in the synced SharePoint folder, never in git.
+# A local copy here (for testing, say) must not be committed: it holds student
+# names, email addresses and grades.
+PeerGrading/
+
+# ===== test output =====
+# Written by the test suite so the generated CSVs and .eml files can be
+# inspected by hand; regenerated on every run.
+artifacts/
+.pytest_cache/
+
+# ===== logs =====
 logs/
-data/raw/
-data/processed/
-
-# ===== local M365 data (DO NOT COMMIT) =====
-PeerGrading/Input/**
-
-# keep folder placeholders if you add them
-!PeerGrading/Input/.gitkeep
-!PeerGrading/Output/.gitkeep
 
 # ===== OS =====
 .DS_Store

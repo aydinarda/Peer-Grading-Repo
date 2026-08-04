@@ -1,0 +1,189 @@
+PeerGrading - how to run it
+===========================
+
+Copy this file into the root of the PeerGrading SharePoint folder, so whoever
+takes over finds it next to the data.
+
+If you have just inherited this: everything you need is in the SharePoint folder
+you were given access to, plus the code repository linked at the bottom. There
+are no accounts, passwords or cloud services to be handed over.
+
+
+What this does
+--------------
+Students grade each other's presentations through a Microsoft Form. Once a week
+this tool reads the Form export, works out each presenter's score, and writes:
+
+  - a summary per week and per presenter
+  - an attendance list (who submitted, who did not)
+  - a ready-to-send feedback mail for every presenter
+
+You review those mails and send them yourself. The tool never emails anyone.
+
+
+Folder layout
+-------------
+  Input/
+    form_exports/forms_responses.xlsx   the Form export
+    students_db/StudentListDB.xlsx      the class roster
+    week_setup/week_windows.csv         which dates belong to which week
+    semester.csv                        semester dates and settings
+    rubric.csv                          how much each answer counts
+    mail_template.txt                   what the feedback mail says
+  Output/                               generated - do not edit by hand
+  Archive/<semester>/                   written once, when the semester ends
+
+Everything you might want to change is in Input/. You should never have to edit
+any code. rubric.csv and mail_template.txt are created for you on the first run
+if they are not there yet.
+
+
+First-time setup (once per computer)
+------------------------------------
+1. Install Python 3.10 or newer from python.org.
+
+2. Get the code:
+     git clone <REPOSITORY URL>
+   or download it as a ZIP and unpack it.
+
+3. Make sure this SharePoint folder is synced to your computer. In SharePoint,
+   open the document library and choose "Add shortcut to OneDrive" (or "Sync").
+   Wait for it to finish downloading.
+
+4. In the code folder, run:
+     macOS:    python3 scripts/setup_local.py
+     Windows:  python scripts\setup_local.py
+
+   It finds the synced folder by itself and remembers where it is. If it cannot,
+   it will ask you to paste the path.
+
+
+Running it each week
+--------------------
+From the code folder:
+
+  macOS:    ./run.sh
+  Windows:  .\run.ps1
+
+The first run takes a minute while it installs what it needs. Afterwards it is
+quick. To recompute a single week: ./run.sh --week W04
+
+You can also set it to run automatically every Sunday - see
+scripts/scheduling/README.md.
+
+
+Sending the feedback mails
+--------------------------
+After a run, look in:
+
+  Output/drafts/<week>/
+
+There is one .eml file per presenter, already addressed and filled in. Select
+them, drag them into your Outlook Drafts folder, read them, then send.
+
+This works in the Outlook desktop app. Outlook in a web browser cannot import
+.eml files.
+
+Output/mails/<week>/ has the same text as plain .txt, for reading or archiving.
+
+
+Checking what happened
+----------------------
+Output/weekly_status.csv lists every week and what the tool did with it:
+
+  computed   grades were found and processed
+  no_data    the week has passed but nobody submitted anything
+  pending    the week has not started yet
+
+Output/unresolved_presenters.csv should be empty. If a name appears there, that
+presenter's name in the Form does not match the roster, so no mail could be
+addressed to them - fix the spelling in StudentListDB.xlsx and run again.
+
+
+Starting a new semester
+-----------------------
+Edit two files in Input/. Nothing in the code changes.
+
+1. week_windows.csv - the week dates. One row per week:
+     week_id,start_local,end_local,deadline_local,tz
+   A response counts for a week if it arrives between start and end, and only if
+   it arrives before the deadline.
+
+2. semester.csv - settings, as key/value rows:
+     semester_id,2027-FS
+     semester_end,2027-06-13
+     tz,Europe/Zurich
+     ta_email,whoever@uzh.ch
+     archive_url,
+
+   semester_end is the important one. After that date the tool stops running,
+   copies everything into Archive/<semester_id>/, and leaves a closure notice
+   there along with a draft mail you can send.
+
+   To retire one file earlier than the rest, add a row like:
+     expires:forms_responses.xlsx,2027-06-01
+
+
+Changing the rubric
+-------------------
+Input/rubric.csv sets how much each answer counts:
+
+  question,weight
+  Q2_1,0.1
+  ...
+  Q4,0.4
+
+The weights normally add up to 1, which keeps the score on a 1-5 scale. If you
+change them so they add up to something else, the tool says so when it runs and
+the mails quote the new maximum instead of 5.00.
+
+All seven questions must appear. Adding or removing questions is a change to the
+code, not to this file.
+
+
+Changing what the mail says
+---------------------------
+Input/mail_template.txt is the feedback mail, in plain text. Edit the greeting,
+the wording, the signature - anything. The first line is the subject.
+
+Placeholders get filled in for you:
+
+  {week_id}            the week, e.g. W04
+  {presenter}          the presenter's name
+  {n_raters}           how many people graded them
+  {mean_score}         their weighted score
+  {max_score}          the highest score possible
+  {question_averages}  one line per question
+  {comments}           the written comments
+
+Lines starting with # are notes to yourself and never appear in the mail.
+
+If you mistype a placeholder the tool stops and tells you which one, rather than
+sending out a broken mail. Run it once after editing to check.
+
+
+If something goes wrong
+-----------------------
+The tool reads everything from this folder every time it runs, so a failed or
+skipped run costs nothing - just run it again. Nothing is ever lost by not
+running it.
+
+Common messages:
+
+  "no PeerGrading data folder configured"
+      Run setup_local.py again. Usually means the synced folder moved.
+
+  "semester.csv not found"
+      Input/semester.csv is missing. The tool will not compute without knowing
+      when the semester ends.
+
+  "Semester is over - nothing to compute."
+      Expected after semester_end. Check Archive/ for the final results.
+
+
+Handing this over
+-----------------
+Give the next person access to this SharePoint folder and point them at this
+file. That is the whole handover - there is nothing else to transfer.
+
+Repository: <REPOSITORY URL>

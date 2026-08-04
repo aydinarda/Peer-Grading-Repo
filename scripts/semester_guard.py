@@ -120,20 +120,15 @@ def build_archive(cfg: dict[str, str], generated_at: datetime) -> Path:
         else:
             print(f"NOTE: {out_dir} does not exist; archiving inputs only.")
 
-        input_dest = archive_dir / "Input"
-        for src in paths.tracked_inputs().values():
-            if src.exists():
-                input_dest.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, input_dest / src.name)
-                copied.append(Path("Input") / src.name)
-            else:
-                print(f"NOTE: {src} is not on disk; archiving without it.")
-
-        semester_src = paths.semester_file()
-        if semester_src.exists():
-            input_dest.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(semester_src, input_dest / semester_src.name)
-            copied.append(Path("Input") / semester_src.name)
+        # The whole Input tree, so the rubric and mail template are recorded
+        # alongside the data they produced results from.
+        in_dir = paths.inputs()
+        if in_dir.is_dir():
+            dest = archive_dir / "Input"
+            shutil.copytree(in_dir, dest, dirs_exist_ok=True)
+            copied.extend(sorted(p.relative_to(archive_dir) for p in dest.rglob("*") if p.is_file()))
+        else:
+            print(f"NOTE: {in_dir} does not exist; archiving outputs only.")
 
         (archive_dir / "MANIFEST.txt").write_text(
             build_manifest(cfg, sorted(copied), generated_at), encoding="utf-8"

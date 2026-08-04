@@ -12,6 +12,7 @@ from typing import Optional, Dict, List
 
 import pandas as pd
 
+import course_config
 import paths
 
 LIKERT_MAP = {
@@ -20,6 +21,13 @@ LIKERT_MAP = {
     "fair 3": 3,
     "good 4": 4,
     "excellent 5": 5,
+}
+
+# Padding keeps the per-question block in the mail aligned.
+QUESTION_LABELS = {
+    "Q2_1": "Q2_1", "Q2_2": "Q2_2", "Q2_3": "Q2_3",
+    "Q3_1": "Q3_1", "Q3_2": "Q3_2", "Q3_3": "Q3_3",
+    "Q4": "Q4  ",
 }
 
 # Fixed header for weekly_summary_*.csv, so an empty week still produces a file
@@ -294,11 +302,9 @@ def main():
     if col_rater_email:
         df[col_rater_email] = df[col_rater_email].astype(str).str.strip().str.lower()
 
-    # Weighted score
-    df["score"] = (
-        0.1 * (df["Q2_1"] + df["Q2_2"] + df["Q2_3"] + df["Q3_1"] + df["Q3_2"] + df["Q3_3"])
-        + 0.4 * df["Q4"]
-    )
+    # Weighted score, using the weights the course set in Input/rubric.csv.
+    weights = course_config.load_weights()
+    df["score"] = sum(w * df[q] for q, w in weights.items())
 
     # Filter by week argument
     target_week = args.week.strip()
@@ -345,6 +351,7 @@ def main():
 
     students = load_students(students_path)
     presenter_emails = build_presenter_email_map(students)
+    mail_template = course_config.load_mail_template()
 
     now_local = pd.Timestamp.now(tz=args.tz)
     weeks_in_scope = [w for w in windows if target_week in ("ALL", w.week_id)]
@@ -417,36 +424,29 @@ def main():
                     if c and c.lower() not in {"nan", "none"}:
                         comments.append(c)
 
-            subject = f"Peer feedback summary ({week_id})"
-            body = []
-            body.append(f"Hi {presenter_display},")
-            body.append("")
-            body.append(f"Here is your peer-assessment summary for {week_id}:")
-            body.append(f"- Number of reviewers: {n}")
-            body.append(f"- Final score (weighted): {mean_score:.2f} / 5.00")
-            body.append("")
-            body.append("Per-question averages (1–5):")
-            body.append(f"- Q2_1: {dfp['Q2_1'].mean():.2f}")
-            body.append(f"- Q2_2: {dfp['Q2_2'].mean():.2f}")
-            body.append(f"- Q2_3: {dfp['Q2_3'].mean():.2f}")
-            body.append(f"- Q3_1: {dfp['Q3_1'].mean():.2f}")
-            body.append(f"- Q3_2: {dfp['Q3_2'].mean():.2f}")
-            body.append(f"- Q3_3: {dfp['Q3_3'].mean():.2f}")
-            body.append(f"- Q4  : {dfp['Q4'].mean():.2f}")
-            body.append("")
             if comments:
-                body.append("Comments:")
-                for i, c in enumerate(comments, 1):
-                    body.append(f"{i}. {c}")
-                body.append("")
+                comment_block = "\n".join(
+                    ["Comments:"] + [f"{i}. {c}" for i, c in enumerate(comments, 1)]
+                )
             else:
-                body.append("Comments: (no written comments submitted)")
-                body.append("")
-            body.append("Best regards,")
-            body.append("Course team")
+                comment_block = "Comments: (no written comments submitted)"
+
+            subject, body = course_config.render_mail(
+                mail_template,
+                week_id=week_id,
+                presenter=presenter_display,
+                n_raters=n,
+                mean_score=f"{mean_score:.2f}",
+                max_score=f"{course_config.max_score(weights):.2f}",
+                question_averages="\n".join(
+                    f"- {label}: {dfp[q].mean():.2f}"
+                    for q, label in QUESTION_LABELS.items()
+                ),
+                comments=comment_block,
+            )
 
             (mails_dir / f"{presenter_safe}.txt").write_text(
-                "\n".join([f"Subject: {subject}", ""] + body), encoding="utf-8"
+                "\n".join([f"Subject: {subject}", "", body]), encoding="utf-8"
             )
 
             if presenter_email:
@@ -454,7 +454,7 @@ def main():
                     drafts_dir / f"{presenter_safe}.eml",
                     to_email=presenter_email,
                     subject=subject,
-                    body="\n".join(body),
+                    body=body,
                 )
             else:
                 unresolved.append({"week_id": week_id, "PresenterChoice": presenter_display})
