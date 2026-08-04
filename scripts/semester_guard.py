@@ -3,9 +3,8 @@
 """Semester expiry guard.
 
 Decides whether the pipeline is still allowed to compute. Every date it needs
-comes from PeerGrading/Input/semester.csv, which is maintained on SharePoint and
-delivered by scripts/fetch_mail.py -- nothing semester-dependent is baked into
-this repo, because weeks and semester boundaries shift from year to year.
+comes from semester.csv in the SharePoint folder -- nothing semester-dependent is
+baked into this repo, because weeks and semester boundaries shift year to year.
 
 semester.csv is a two-column key/value file:
 
@@ -24,57 +23,53 @@ before the semester itself ends. Anything not listed inherits semester_end:
 
 A date without a time means "end of that day" in tz.
 
+A date without a time means "end of that day" in tz.
+
 Behaviour once the deadline has passed:
   - No computation happens. The stop is silent by design: no warning window,
-    no build noise in the weeks leading up to it.
-  - push_outputs.py --mode archive ships the semester bundle, so the Archive the
-    closure mail talks about actually exists by the time it is announced.
-  - The TA is mailed exactly once, via the dead-drop mailbox, telling them the
-    semester is over and their files are headed for the Archive.
-  - A marker (PeerGrading/Output/semester_closed.txt) is written and committed
-    so later scheduled runs stay quiet instead of re-sending that mail.
+    no noise in the weeks leading up to it.
+  - Everything the semester produced is copied into Archive/<semester_id>/,
+    alongside a snapshot of the inputs and a MANIFEST.txt.
+  - A closure notice is written there, and a draft mail to the TA is generated
+    as an .eml -- the same drag-into-Outlook flow as the student feedback mails,
+    so the system needs no mail credentials of its own.
+  - A marker (Output/semester_closed.txt) records that this happened, so later
+    runs stay quiet instead of redoing it.
 
 Because the guard runs before compute, the archive holds the outputs of the last
 successful weekly run - which is what "the last week has been calculated" means.
 
-Exit codes: 0 = decision made (see the `expired` output), 1 = cannot decide, or
-the notification could not be delivered.
+Exit codes, for the run wrappers to act on:
+  0  semester is active - go ahead and compute
+  2  expired - stop, do not compute (archiving, if due, has already happened)
+  1  could not decide, or the archive could not be written
 """
 
 from __future__ import annotations
 
-import os
-import smtplib
-import ssl
-import subprocess
+import argparse
+import shutil
 import sys
 from datetime import datetime
 from email.message import EmailMessage
+from email.utils import format_datetime
 from pathlib import Path
 
-from semester_config import SEMESTER_FILE, fail, get_tz, load_semester_config, parse_deadline
+import paths
+from semester_config import fail, get_tz, load_semester_config, parse_deadline
 
-MARKER_FILE = Path("PeerGrading/Output/semester_closed.txt")
-ARCHIVE_SCRIPT = Path(__file__).resolve().parent / "push_outputs.py"
-
-# Inputs the guard reports on individually, keyed by the name used in
-# `expires:<name>` overrides.
-TRACKED_SOURCES = {
-    "forms_responses.xlsx": Path("PeerGrading/Input/form_exports/forms_responses.xlsx"),
-    "StudentListDB.xlsx": Path("PeerGrading/Input/students_db/StudentListDB.xlsx"),
-    "week_windows.csv": Path("PeerGrading/Input/week_setup/week_windows.csv"),
-}
+EXIT_EXPIRED = 2
 
 
-def build_message(cfg: dict[str, str]) -> str:
+def build_message(cfg: dict[str, str], archive_dir: Path) -> str:
     archive_url = cfg.get("archive_url", "").strip()
-    archive_line = archive_url if archive_url else "(the archive link will follow separately)"
+    archive_line = archive_url if archive_url else archive_dir.as_posix()
     return (
         "Hello,\n\n"
         f"The semester ({cfg['semester_id']}) has ended and the last week has been "
         "calculated. No further peer-grading runs will take place.\n\n"
         "Your files -- weekly summaries, peer logs, attendance lists and the "
-        "per-presenter mail drafts -- will be stored in the Archive. Please download "
+        "per-presenter mail drafts -- have been stored in the Archive. Please download "
         "anything you still need before they are moved.\n\n"
         f"Archive: {archive_line}\n\n"
         "Best regards,\n"
@@ -82,66 +77,117 @@ def build_message(cfg: dict[str, str]) -> str:
     )
 
 
-def send_closure_mail(cfg: dict[str, str]) -> None:
-    sender = os.getenv("MAIL_SMTP_USER", "").strip() or os.getenv("MAIL_IMAP_USER", "").strip()
-    password = os.getenv("MAIL_SMTP_PASSWORD", "").strip() or os.getenv("MAIL_IMAP_PASSWORD", "").strip()
-    if not sender or not password:
-        fail("cannot send the closure mail: MAIL_IMAP_USER / MAIL_IMAP_PASSWORD are not set.")
+def build_manifest(cfg: dict[str, str], files: list[Path], generated_at: datetime) -> str:
+    lines = [
+        f"semester_id: {cfg['semester_id']}",
+        f"semester_end: {cfg['semester_end']}",
+        f"generated_at: {generated_at.isoformat()}",
+        f"file_count: {len(files)}",
+        "",
+    ]
 
-    host = os.getenv("MAIL_SMTP_HOST", "smtp.gmail.com").strip()
-    port = int(os.getenv("MAIL_SMTP_PORT", "465").strip())
+    status_file = paths.outputs() / "weekly_status.csv"
+    if status_file.exists():
+        lines.append("Week-by-week status (from weekly_status.csv):")
+        lines.append(status_file.read_text(encoding="utf-8").strip())
+        lines.append("")
 
-    msg = EmailMessage()
-    msg["From"] = sender
-    msg["To"] = cfg["ta_email"]
-    msg["Subject"] = f"PeerGrading: semester {cfg['semester_id']} has ended"
-    msg.set_content(build_message(cfg))
+    lines.append("Files:")
+    lines.extend(f"  {p}" for p in files)
+    lines.append("")
+    return "\n".join(lines)
+
+
+def build_archive(cfg: dict[str, str], generated_at: datetime) -> Path:
+    """Copy everything the semester produced into Archive/<semester_id>/.
+
+    Failing here is fatal on purpose: the marker is only written afterwards, so
+    the next run retries the whole closure rather than leaving behind a notice
+    pointing at an archive that was never produced.
+    """
+    archive_dir = paths.archive() / cfg["semester_id"]
+    print(f"Archiving semester {cfg['semester_id']} to {archive_dir} ...")
 
     try:
-        with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context()) as smtp:
-            smtp.login(sender, password)
-            smtp.send_message(msg)
-    except Exception as exc:  # noqa: BLE001 - surfacing the reason matters more than the type
-        fail(f"closure mail to {cfg['ta_email']} could not be sent: {exc}")
+        archive_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Closure mail sent to {cfg['ta_email']}.")
+        out_dir = paths.outputs()
+        copied: list[Path] = []
+        if out_dir.is_dir():
+            dest = archive_dir / "Output"
+            shutil.copytree(out_dir, dest, dirs_exist_ok=True)
+            copied.extend(sorted(p.relative_to(archive_dir) for p in dest.rglob("*") if p.is_file()))
+        else:
+            print(f"NOTE: {out_dir} does not exist; archiving inputs only.")
 
+        input_dest = archive_dir / "Input"
+        for src in paths.tracked_inputs().values():
+            if src.exists():
+                input_dest.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, input_dest / src.name)
+                copied.append(Path("Input") / src.name)
+            else:
+                print(f"NOTE: {src} is not on disk; archiving without it.")
 
-def send_semester_archive(cfg: dict[str, str]) -> None:
-    """Ship the semester archive before announcing closure.
+        semester_src = paths.semester_file()
+        if semester_src.exists():
+            input_dest.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(semester_src, input_dest / semester_src.name)
+            copied.append(Path("Input") / semester_src.name)
 
-    Delegates to push_outputs.py so that building and mailing a bundle lives in
-    exactly one place. Failing here is fatal on purpose: the marker is only
-    written afterwards, so the next scheduled run retries the whole closure
-    rather than leaving the TA with a mail pointing at an archive that was never
-    produced.
-    """
-    cmd = [sys.executable, str(ARCHIVE_SCRIPT), "--mode", "archive"]
-    print(f"Building semester archive for {cfg['semester_id']}...")
-    result = subprocess.run(cmd)
-    if result.returncode != 0:
+        (archive_dir / "MANIFEST.txt").write_text(
+            build_manifest(cfg, sorted(copied), generated_at), encoding="utf-8"
+        )
+    except OSError as exc:
         fail(
-            f"semester archive could not be sent (exit {result.returncode}). "
+            f"could not write the archive to {archive_dir}: {exc}. "
             "Closure is not recorded; the next run will retry."
         )
 
+    print(f"Archived {len(copied)} file(s).")
+    return archive_dir
 
-def write_output(expired: bool) -> None:
-    gh_output = os.getenv("GITHUB_OUTPUT")
-    if gh_output:
-        with open(gh_output, "a", encoding="utf-8") as f:
-            f.write(f"expired={'true' if expired else 'false'}\n")
+
+def write_closure_notice(cfg: dict[str, str], archive_dir: Path, generated_at: datetime) -> None:
+    """Leave the closure message where the next person will find it.
+
+    Two forms: a plain notice inside the archive, and an .eml draft addressed to
+    the TA, so whoever runs this can drag it into Outlook and send it if they are
+    not the TA themselves.
+    """
+    body = build_message(cfg, archive_dir)
+    subject = f"PeerGrading: semester {cfg['semester_id']} has ended"
+
+    (archive_dir / "SEMESTER_CLOSED.txt").write_text(
+        f"{subject}\n\n{body}", encoding="utf-8"
+    )
+
+    msg = EmailMessage()
+    msg["To"] = cfg["ta_email"]
+    msg["Subject"] = subject
+    msg["Date"] = format_datetime(generated_at)
+    msg.set_content(body)
+    draft = archive_dir / "semester_closed.eml"
+    draft.write_bytes(bytes(msg))
+
+    print(f"Closure notice written to {archive_dir / 'SEMESTER_CLOSED.txt'}")
+    print(f"Draft mail for {cfg['ta_email']}: {draft}")
 
 
 def main() -> None:
-    cfg = load_semester_config(SEMESTER_FILE)
+    ap = argparse.ArgumentParser(description="Stop the pipeline once the semester has ended.")
+    paths.add_root_argument(ap)
+    args = ap.parse_args()
+    paths.set_root(args.root)
+
+    cfg = load_semester_config()
     tz = get_tz(cfg)
     now = datetime.now(tz)
     semester_end = parse_deadline(cfg["semester_end"], tz, "semester_end")
 
     # Per-source expiry, defaulting to the semester deadline.
     expired_sources = []
-    for name, path in TRACKED_SOURCES.items():
+    for name, path in paths.tracked_inputs().items():
         override = cfg.get(f"expires:{name}", "").strip()
         deadline = parse_deadline(override, tz, f"expires:{name}") if override else semester_end
         if now > deadline:
@@ -157,7 +203,6 @@ def main() -> None:
             f"Semester {cfg['semester_id']} is active "
             f"(now {now:%Y-%m-%d %H:%M %Z}, ends {semester_end:%Y-%m-%d %H:%M %Z})."
         )
-        write_output(False)
         return
 
     for name, deadline in expired_sources:
@@ -168,24 +213,24 @@ def main() -> None:
         print(f"Semester {cfg['semester_id']} runs until {semester_end:%Y-%m-%d %H:%M %Z}, "
               "but an input has expired - not computing.")
 
-    already_closed = MARKER_FILE.exists() and cfg["semester_id"] in MARKER_FILE.read_text(encoding="utf-8")
+    marker = paths.marker_file()
+    already_closed = marker.exists() and cfg["semester_id"] in marker.read_text(encoding="utf-8")
     if already_closed:
-        print("Closure was already announced - staying silent.")
-        write_output(True)
-        return
+        print("Closure was already recorded - staying silent.")
+        sys.exit(EXIT_EXPIRED)
 
-    send_semester_archive(cfg)
-    send_closure_mail(cfg)
-    MARKER_FILE.parent.mkdir(parents=True, exist_ok=True)
-    MARKER_FILE.write_text(
+    archive_dir = build_archive(cfg, now)
+    write_closure_notice(cfg, archive_dir, now)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
         f"semester_id={cfg['semester_id']}\n"
         f"semester_end={semester_end.isoformat()}\n"
         f"closed_at={now.isoformat()}\n"
         f"notified={cfg['ta_email']}\n",
         encoding="utf-8",
     )
-    print(f"Wrote {MARKER_FILE}.")
-    write_output(True)
+    print(f"Wrote {marker}.")
+    sys.exit(EXIT_EXPIRED)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,8 @@ from typing import Optional, Dict, List
 
 import pandas as pd
 
+import paths
+
 LIKERT_MAP = {
     "bad 1": 1,
     "poor 2": 2,
@@ -194,18 +196,22 @@ def load_students(path: Path) -> Optional[pd.DataFrame]:
 
 def main():
     ap = argparse.ArgumentParser(description="Compute weekly peer-grading summaries from Forms exports.")
-    ap.add_argument("--responses", default="PeerGrading/Input/form_exports/forms_responses.xlsx")
-    ap.add_argument("--week-windows", default="PeerGrading/Input/week_setup/week_windows.csv")
-    ap.add_argument("--students", default="PeerGrading/Input/students_db/StudentListDB.xlsx")
-    ap.add_argument("--out-dir", default="PeerGrading/Output")
+    paths.add_root_argument(ap)
+    ap.add_argument("--responses", default=None)
+    ap.add_argument("--week-windows", default=None)
+    ap.add_argument("--students", default=None)
+    ap.add_argument("--out-dir", default=None)
     ap.add_argument("--week", default="ALL")
     ap.add_argument("--tz", default="Europe/Zurich")
     args = ap.parse_args()
 
-    responses_path = Path(args.responses)
-    week_path = Path(args.week_windows)
-    students_path = Path(args.students)
-    out_dir = Path(args.out_dir)
+    # Individual paths default to their place under the data root, but stay
+    # overridable one by one - useful for dry runs against a fixture.
+    paths.set_root(args.root)
+    responses_path = Path(args.responses) if args.responses else paths.responses_file()
+    week_path = Path(args.week_windows) if args.week_windows else paths.week_windows_file()
+    students_path = Path(args.students) if args.students else paths.students_file()
+    out_dir = Path(args.out_dir) if args.out_dir else paths.outputs()
 
     if not responses_path.exists():
         raise FileNotFoundError(f"Responses file not found: {responses_path}")

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Shared reader for PeerGrading/Input/semester.csv.
+"""Shared reader for semester.csv.
 
-The file is maintained on SharePoint and delivered by scripts/fetch_mail.py.
-It is a two-column key/value CSV:
+The file lives in the SharePoint folder next to the other inputs (see paths.py)
+and is a two-column key/value CSV:
 
     key,value
     semester_id,2026-FS
@@ -17,8 +17,8 @@ the semester itself ends. Anything not listed inherits semester_end:
 
     expires:forms_responses.xlsx,2026-06-07
 
-Used by semester_guard.py, compute_weekly.py and push_outputs.py so the same
-dates are parsed the same way everywhere.
+Used by semester_guard.py and compute_weekly.py so the same dates are parsed the
+same way everywhere.
 """
 
 from __future__ import annotations
@@ -29,7 +29,8 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-SEMESTER_FILE = Path("PeerGrading/Input/semester.csv")
+import paths
+
 DEFAULT_TZ = "Europe/Zurich"
 REQUIRED_KEYS = ("semester_id", "semester_end", "ta_email")
 
@@ -39,12 +40,13 @@ def fail(msg: str) -> None:
     sys.exit(1)
 
 
-def load_semester_config(path: Path = SEMESTER_FILE) -> dict[str, str]:
+def load_semester_config(path: Path | None = None) -> dict[str, str]:
+    path = path or paths.semester_file()
     if not path.exists():
         fail(
-            f"{path} not found. It is delivered from SharePoint by the mail sync; "
-            "without it there is no expiry date, and the pipeline refuses to run "
-            "against data it cannot date-check."
+            f"{path} not found. It defines when the semester ends; without it "
+            "there is no expiry date, and the pipeline refuses to run against "
+            "data it cannot date-check."
         )
 
     cfg: dict[str, str] = {}
@@ -69,7 +71,7 @@ def get_tz(cfg: dict[str, str]) -> ZoneInfo:
     try:
         return ZoneInfo(tz_name)
     except ZoneInfoNotFoundError:
-        fail(f"unknown timezone '{tz_name}' in {SEMESTER_FILE}.")
+        fail(f"unknown timezone '{tz_name}' in {paths.semester_file()}.")
         raise  # unreachable, keeps type checkers happy
 
 
