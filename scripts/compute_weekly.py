@@ -4,6 +4,9 @@
 import argparse
 import re
 from dataclasses import dataclass
+from datetime import datetime
+from email.message import EmailMessage
+from email.utils import format_datetime
 from pathlib import Path
 from typing import Optional, Dict, List
 
@@ -16,6 +19,15 @@ LIKERT_MAP = {
     "good 4": 4,
     "excellent 5": 5,
 }
+
+# Fixed header for weekly_summary_*.csv, so an empty week still produces a file
+# with the same shape as a full one.
+SUMMARY_COLS = [
+    "week_id", "PresenterChoice", "n_raters",
+    "mean_score", "std_score", "min_score", "max_score",
+    "mean_Q2_1", "mean_Q2_2", "mean_Q2_3",
+    "mean_Q3_1", "mean_Q3_2", "mean_Q3_3", "mean_Q4",
+]
 
 
 def likert_to_int(x) -> Optional[int]:
@@ -48,12 +60,52 @@ class WeekWindow:
     tz: str
 
 
+def normalize_display_name(s) -> str:
+    """Collapse the separators Forms puts inside PresenterChoice.
+
+    Values arrive as "Arda\tAydin", "Jan-Akim Albert Reimer\n" or
+    "Steven Thomas\tUvakov" depending on how the dropdown was built, so the raw
+    value is unusable both for matching against the roster and for greeting the
+    presenter in a mail.
+    """
+    if s is None or (isinstance(s, float) and pd.isna(s)):
+        return ""
+    return re.sub(r"\s+", " ", str(s)).strip()
+
+
+def build_presenter_email_map(students: Optional[pd.DataFrame]) -> Dict[str, str]:
+    """Map normalized "First Last" -> email, for addressing draft mails."""
+    if students is None:
+        return {}
+    mapping: Dict[str, str] = {}
+    for _, row in students.iterrows():
+        name = normalize_display_name(row.get("StudentName", "")).lower()
+        email = str(row.get("StudentEmail", "")).strip().lower()
+        if name and email:
+            mapping[name] = email
+    return mapping
+
+
 def sanitize_filename(s: str) -> str:
     s = s.strip()
     s = re.sub(r"\s+", " ", s)
     s = re.sub(r"[^a-zA-Z0-9 _.-]", "", s)
     s = s.replace(" ", "_")
     return s[:120] if s else "unknown"
+
+
+def write_eml(path: Path, to_email: str, subject: str, body: str) -> None:
+    """Write an RFC 822 draft that Outlook can import.
+
+    No From header on purpose: Outlook fills in the account the draft is dropped
+    into, which keeps the sender address out of the config entirely.
+    """
+    msg = EmailMessage()
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg["Date"] = format_datetime(datetime.now().astimezone())
+    msg.set_content(body)
+    path.write_bytes(bytes(msg))
 
 
 def find_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
@@ -249,57 +301,106 @@ def main():
 
     if df.empty:
         print("No rows to process after filtering. (Check week range / deadlines / timestamps).")
-        return
 
     # Deduplicate: same rater grading same presenter in same week -> keep latest
-    if col_rater_email:
+    if col_rater_email and not df.empty:
         df = df.sort_values("_ts_utc")
         df = df.drop_duplicates(subset=["week_id", col_presenter, col_rater_email], keep="last").copy()
 
     # Weekly summary per (week, presenter)
-    agg = df.groupby(["week_id", col_presenter]).agg(
-        n_raters=("score", "count"),
-        mean_score=("score", "mean"),
-        std_score=("score", "std"),
-        min_score=("score", "min"),
-        max_score=("score", "max"),
-        mean_Q2_1=("Q2_1", "mean"),
-        mean_Q2_2=("Q2_2", "mean"),
-        mean_Q2_3=("Q2_3", "mean"),
-        mean_Q3_1=("Q3_1", "mean"),
-        mean_Q3_2=("Q3_2", "mean"),
-        mean_Q3_3=("Q3_3", "mean"),
-        mean_Q4=("Q4", "mean"),
-    ).reset_index().rename(columns={col_presenter: "PresenterChoice"})
+    if df.empty:
+        agg = pd.DataFrame(columns=SUMMARY_COLS)
+    else:
+        agg = df.groupby(["week_id", col_presenter]).agg(
+            n_raters=("score", "count"),
+            mean_score=("score", "mean"),
+            std_score=("score", "std"),
+            min_score=("score", "min"),
+            max_score=("score", "max"),
+            mean_Q2_1=("Q2_1", "mean"),
+            mean_Q2_2=("Q2_2", "mean"),
+            mean_Q2_3=("Q2_3", "mean"),
+            mean_Q3_1=("Q3_1", "mean"),
+            mean_Q3_2=("Q3_2", "mean"),
+            mean_Q3_3=("Q3_3", "mean"),
+            mean_Q4=("Q4", "mean"),
+        ).reset_index().rename(columns={col_presenter: "PresenterChoice"})
 
-    # Save per-week outputs + mail drafts + peer logs
-    for week_id, dfw in agg.groupby("week_id"):
-        dfw = dfw.sort_values(["mean_score", "n_raters"], ascending=[False, False])
-        dfw.to_csv(out_dir / f"weekly_summary_{week_id}.csv", index=False)
+    # Peer log columns depend only on which optional columns the export carries.
+    log_cols = ["week_id", "_ts_local", "PresenterChoice", "score"]
+    if col_response_id:
+        log_cols.insert(1, col_response_id)
+    if col_rater_email:
+        log_cols.insert(2, col_rater_email)
+    if col_rater_name:
+        log_cols.insert(2, col_rater_name)
+    if col_comment:
+        log_cols.append(col_comment)
 
-        # Peer log (deduped)
-        dflog = df[df["week_id"] == week_id].rename(columns={col_presenter: "PresenterChoice"}).copy()
-        dflog["_ts_local"] = dflog["_ts_local"].astype(str)
+    students = load_students(students_path)
+    presenter_emails = build_presenter_email_map(students)
 
-        keep_cols = ["week_id", "_ts_local", "PresenterChoice", "score"]
-        if col_response_id and col_response_id in dflog.columns:
-            keep_cols.insert(1, col_response_id)
-        if col_rater_email:
-            keep_cols.insert(2, col_rater_email)
-        if col_rater_name:
-            keep_cols.insert(2, col_rater_name)
-        if col_comment:
-            keep_cols.append(col_comment)
+    now_local = pd.Timestamp.now(tz=args.tz)
+    weeks_in_scope = [w for w in windows if target_week in ("ALL", w.week_id)]
 
-        dflog = dflog[keep_cols].copy()
+    status_rows: List[dict] = []
+    unresolved: List[dict] = []
+
+    # Walk every defined week, not just the ones that happen to have responses:
+    # a week with nothing in it is a result too, and has to be visible as one.
+    for w in weeks_in_scope:
+        week_id = w.week_id
+        status_row = {
+            "week_id": week_id,
+            "start_local": w.start_local.isoformat(),
+            "end_local": w.end_local.isoformat(),
+            "deadline_local": w.deadline_local.isoformat(),
+            "n_responses": 0,
+            "n_presenters": 0,
+            "status": "pending",
+        }
+
+        if w.start_local > now_local:
+            # Window has not opened yet - no files, so February does not fill up
+            # with a dozen empty weeks.
+            status_rows.append(status_row)
+            continue
+
+        dfw_rows = df[df["week_id"] == week_id] if not df.empty else df
+        summary = agg[agg["week_id"] == week_id] if not agg.empty else agg
+
+        status_row["n_responses"] = int(len(dfw_rows))
+        status_row["n_presenters"] = int(len(summary))
+        status_row["status"] = "computed" if len(dfw_rows) else "no_data"
+        status_rows.append(status_row)
+
+        # Header-only files when the week is empty, so "no submissions" is
+        # distinguishable from "never ran".
+        summary.sort_values(
+            ["mean_score", "n_raters"], ascending=[False, False]
+        ).to_csv(out_dir / f"weekly_summary_{week_id}.csv", index=False)
+
+        if len(dfw_rows):
+            dflog = dfw_rows.rename(columns={col_presenter: "PresenterChoice"}).copy()
+            dflog["_ts_local"] = dflog["_ts_local"].astype(str)
+            dflog = dflog[log_cols].copy()
+        else:
+            dflog = pd.DataFrame(columns=log_cols)
         dflog.to_csv(out_dir / f"peer_log_{week_id}.csv", index=False)
 
-        # Mail drafts
+        if not len(dfw_rows):
+            continue
+
+        # Mail drafts: .txt to read and archive, .eml to drag into Outlook.
         mails_dir = out_dir / "mails" / week_id
         mails_dir.mkdir(parents=True, exist_ok=True)
+        drafts_dir = out_dir / "drafts" / week_id
+        drafts_dir.mkdir(parents=True, exist_ok=True)
 
-        for presenter, dfp in df[df["week_id"] == week_id].rename(columns={col_presenter: "PresenterChoice"}).groupby("PresenterChoice"):
-            presenter_safe = sanitize_filename(str(presenter))
+        for presenter, dfp in dfw_rows.rename(columns={col_presenter: "PresenterChoice"}).groupby("PresenterChoice"):
+            presenter_display = normalize_display_name(presenter)
+            presenter_safe = sanitize_filename(presenter_display)
+            presenter_email = presenter_emails.get(presenter_display.lower(), "")
             mean_score = float(dfp["score"].mean())
             n = int(dfp["score"].count())
 
@@ -310,36 +411,59 @@ def main():
                     if c and c.lower() not in {"nan", "none"}:
                         comments.append(c)
 
-            lines = []
-            lines.append(f"Subject: Peer feedback summary ({week_id})")
-            lines.append("")
-            lines.append(f"Hi {presenter},")
-            lines.append("")
-            lines.append(f"Here is your peer-assessment summary for {week_id}:")
-            lines.append(f"- Number of reviewers: {n}")
-            lines.append(f"- Final score (weighted): {mean_score:.2f} / 5.00")
-            lines.append("")
-            lines.append("Per-question averages (1–5):")
-            lines.append(f"- Q2_1: {dfp['Q2_1'].mean():.2f}")
-            lines.append(f"- Q2_2: {dfp['Q2_2'].mean():.2f}")
-            lines.append(f"- Q2_3: {dfp['Q2_3'].mean():.2f}")
-            lines.append(f"- Q3_1: {dfp['Q3_1'].mean():.2f}")
-            lines.append(f"- Q3_2: {dfp['Q3_2'].mean():.2f}")
-            lines.append(f"- Q3_3: {dfp['Q3_3'].mean():.2f}")
-            lines.append(f"- Q4  : {dfp['Q4'].mean():.2f}")
-            lines.append("")
+            subject = f"Peer feedback summary ({week_id})"
+            body = []
+            body.append(f"Hi {presenter_display},")
+            body.append("")
+            body.append(f"Here is your peer-assessment summary for {week_id}:")
+            body.append(f"- Number of reviewers: {n}")
+            body.append(f"- Final score (weighted): {mean_score:.2f} / 5.00")
+            body.append("")
+            body.append("Per-question averages (1–5):")
+            body.append(f"- Q2_1: {dfp['Q2_1'].mean():.2f}")
+            body.append(f"- Q2_2: {dfp['Q2_2'].mean():.2f}")
+            body.append(f"- Q2_3: {dfp['Q2_3'].mean():.2f}")
+            body.append(f"- Q3_1: {dfp['Q3_1'].mean():.2f}")
+            body.append(f"- Q3_2: {dfp['Q3_2'].mean():.2f}")
+            body.append(f"- Q3_3: {dfp['Q3_3'].mean():.2f}")
+            body.append(f"- Q4  : {dfp['Q4'].mean():.2f}")
+            body.append("")
             if comments:
-                lines.append("Comments:")
+                body.append("Comments:")
                 for i, c in enumerate(comments, 1):
-                    lines.append(f"{i}. {c}")
-                lines.append("")
+                    body.append(f"{i}. {c}")
+                body.append("")
             else:
-                lines.append("Comments: (no written comments submitted)")
-                lines.append("")
-            lines.append("Best regards,")
-            lines.append("Course team")
+                body.append("Comments: (no written comments submitted)")
+                body.append("")
+            body.append("Best regards,")
+            body.append("Course team")
 
-            (mails_dir / f"{presenter_safe}.txt").write_text("\n".join(lines), encoding="utf-8")
+            (mails_dir / f"{presenter_safe}.txt").write_text(
+                "\n".join([f"Subject: {subject}", ""] + body), encoding="utf-8"
+            )
+
+            if presenter_email:
+                write_eml(
+                    drafts_dir / f"{presenter_safe}.eml",
+                    to_email=presenter_email,
+                    subject=subject,
+                    body="\n".join(body),
+                )
+            else:
+                unresolved.append({"week_id": week_id, "PresenterChoice": presenter_display})
+
+    pd.DataFrame(status_rows).to_csv(out_dir / "weekly_status.csv", index=False)
+    pd.DataFrame(unresolved, columns=["week_id", "PresenterChoice"]).to_csv(
+        out_dir / "unresolved_presenters.csv", index=False
+    )
+    if unresolved:
+        print(f"WARNING: {len(unresolved)} presenter(s) could not be matched to a roster "
+              f"email; no .eml draft was written for them. See unresolved_presenters.csv.")
+
+    if df.empty:
+        print(f"Done. Outputs written under: {out_dir}")
+        return
 
     # Master edges (week-by-week birikir)
     edges_cols = {
@@ -388,20 +512,29 @@ def main():
         mat_count.to_csv(master_dir / "grade_matrix_count.csv")
         mat_mean.to_csv(master_dir / "grade_matrix_mean.csv")
 
-    # Attendance per week
-    students = load_students(students_path)
+    # Attendance per week. Driven by the weeks in scope rather than by the weeks
+    # present in the edges, so an empty week still yields a full roster with
+    # everyone at zero.
     if students is not None and "RaterEmail" in all_edges.columns:
-        for week_id in sorted(all_edges["week_id"].dropna().unique().tolist()):
+        started = {r["week_id"] for r in status_rows if r["status"] != "pending"}
+        for week_id in sorted(started):
             ew = all_edges[all_edges["week_id"] == week_id].copy()
-            per = ew.groupby("RaterEmail").agg(
-                n_submissions=("score", "count"),
-                last_submission=("ts_local", "max"),
-            ).reset_index().rename(columns={"RaterEmail": "StudentEmail"})
+            if len(ew):
+                per = ew.groupby("RaterEmail").agg(
+                    n_submissions=("score", "count"),
+                    last_submission=("ts_local", "max"),
+                ).reset_index().rename(columns={"RaterEmail": "StudentEmail"})
+            else:
+                per = pd.DataFrame(columns=["StudentEmail", "n_submissions", "last_submission"])
 
             att = students.merge(per, on="StudentEmail", how="left")
-            att["n_submissions"] = att["n_submissions"].fillna(0).astype(int)
+            # to_numeric first: for an empty week the merged column is all-NaN
+            # object dtype, which .fillna would silently downcast.
+            att["n_submissions"] = pd.to_numeric(att["n_submissions"], errors="coerce").fillna(0).astype(int)
             att["submitted"] = (att["n_submissions"] > 0).astype(int)
-            att["last_submission"] = att["last_submission"].fillna("")
+            att["last_submission"] = att["last_submission"].astype(object).where(
+                att["last_submission"].notna(), ""
+            )
             att = att.sort_values(["submitted", "n_submissions"], ascending=[True, False])
 
             att.to_csv(out_dir / f"attendance_{week_id}.csv", index=False)

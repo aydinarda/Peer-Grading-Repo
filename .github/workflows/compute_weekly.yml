@@ -1,3 +1,10 @@
+# ============================================================================
+# [1st PIPELINE - PULL MODEL] (legacy)
+# Pulls forms_responses.xlsx from an expiring SharePoint share link
+# (secrets.FORMS_XLSX_URL -> must be re-shared monthly due to org policy).
+# Replacement: .github/workflows/mail_sync.yml (2nd pipeline, mail dead-drop).
+# Delete this file once the 2nd pipeline is verified.
+# ============================================================================
 name: Sync Forms Excel + Compute weekly peer grading
 
 on:
@@ -10,6 +17,8 @@ on:
       - "PeerGrading/Input/week_setup/**"
       - "PeerGrading/Input/students_db/**"
 
+  # [1st pipeline specific] schedule: the 2nd pipeline (mail_sync.yml) has its
+  # own Sunday-morning schedule. After cutover, this whole file goes away.
   schedule:
     - cron: "10 23 * * SAT"  # CET: 00:10 Sun
     - cron: "10 22 * * SAT"  # CEST: 00:10 Sun
@@ -48,6 +57,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # [1st pipeline specific] This entire step is the expiring pull:
+      # downloads via the SharePoint share link (secrets.FORMS_XLSX_URL).
+      # In the 2nd pipeline it is replaced by scripts/fetch_mail.py (IMAP).
       - name: Download latest forms Excel
         env:
           FORMS_XLSX_URL: ${{ secrets.FORMS_XLSX_URL }}
@@ -114,6 +126,9 @@ jobs:
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
+      # [shared logic, duplicated in 2nd pipeline] Same PR mechanism exists in
+      # mail_sync.yml but on a different branch (bot/mail-sync-outputs) so the
+      # two pipelines never fight over the same bot branch.
       - name: Create PR if changed
         if: steps.changes.outputs.changed == 'true'
         id: cpr
