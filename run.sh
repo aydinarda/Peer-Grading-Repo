@@ -41,5 +41,5 @@ esac
 "$PY" scripts/compute_weekly.py "$@"
 
 echo
-echo "Done. Draft mails are under Output/<week>/drafts/ in the PeerGrading folder."
+echo "Done. Draft mails are under Output/<week>/emls/ in the PeerGrading folder."
 echo "Drag the .eml files into Outlook Drafts, review them, then send."

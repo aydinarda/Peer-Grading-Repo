@@ -227,7 +227,8 @@ class DataRoot:
         return self.outputs / week_id
 
     def drafts(self, week_id: str) -> Path:
-        return self.week(week_id) / "drafts"
+        """The .eml files, inside the week's folder and apart from the .txt copies."""
+        return self.week(week_id) / "emls"
 
     def mails(self, week_id: str) -> Path:
         return self.week(week_id) / "mails"

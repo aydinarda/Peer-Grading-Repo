@@ -408,11 +408,12 @@ def main():
         if not len(dfw_rows):
             continue
 
-        # Mail drafts: .txt to read and archive, .eml to drag into Outlook.
+        # Two copies of the same mail, kept apart: emls/ holds what you drag
+        # into Outlook, mails/ the plain text to read and archive.
         mails_dir = week_dir / "mails"
         mails_dir.mkdir(parents=True, exist_ok=True)
-        drafts_dir = week_dir / "drafts"
-        drafts_dir.mkdir(parents=True, exist_ok=True)
+        emls_dir = week_dir / "emls"
+        emls_dir.mkdir(parents=True, exist_ok=True)
 
         for presenter, dfp in dfw_rows.rename(columns={col_presenter: "PresenterChoice"}).groupby("PresenterChoice"):
             presenter_display = normalize_display_name(presenter)
@@ -455,7 +456,7 @@ def main():
 
             if presenter_email:
                 write_eml(
-                    drafts_dir / f"{presenter_safe}.eml",
+                    emls_dir / f"{presenter_safe}.eml",
                     to_email=presenter_email,
                     subject=subject,
                     body=body,

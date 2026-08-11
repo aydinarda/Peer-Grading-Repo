@@ -76,7 +76,7 @@ Sending the feedback mails
 --------------------------
 After a run, look in:
 
-  Output/<week>/drafts/          e.g. Output/W04/drafts/
+  Output/<week>/emls/          e.g. Output/W04/emls/
 
 There is one .eml file per presenter, already addressed and filled in. Select
 them, drag them into your Outlook Drafts folder, read them, then send.
@@ -84,10 +84,11 @@ them, drag them into your Outlook Drafts folder, read them, then send.
 This works in the Outlook desktop app. Outlook in a web browser cannot import
 .eml files.
 
-Output/<week>/mails/ has the same text as plain .txt, for reading or archiving.
-
 Everything else for that week is in the same folder: summary.csv (the scores),
-peer_log.csv (who graded whom) and attendance.csv (who submitted).
+peer_log.csv (who graded whom), attendance.csv (who submitted), and mails/ with
+the same mail text as plain .txt for reading or archiving.
+
+So within a week: emls/ is what you send, everything else is what you keep.
 
 
 Checking what happened

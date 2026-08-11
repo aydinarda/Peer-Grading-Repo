@@ -120,8 +120,8 @@ Output/
     summary.csv              per presenter: n_raters, mean/std/min/max, question means
     peer_log.csv             the deduped rater-level rows behind those numbers
     attendance.csv           the full roster, with a submitted flag
-    mails/<Name>.txt         feedback mail as plain text
-    drafts/<Name>.eml        the same mail, Outlook-importable
+    emls/<Name>.eml          what you drag into Outlook
+    mails/<Name>.txt         the same mail as plain text, to read and archive
   W02/ ...
   master/
     grade_edges.csv          cumulative across runs, deduped on ResponseId
@@ -132,11 +132,11 @@ Output/
 
 Every week whose window has opened gets a folder, even when nobody submitted: `summary.csv`
 and `peer_log.csv` are headers only, `attendance.csv` shows the whole roster at zero, and
-there is no `mails/` or `drafts/`. A week with no folder at all has not started yet.
+there is no `emls/` or `mails/`. A week with no folder at all has not started yet.
 
 ### Draft mails
 
-`W<nn>/drafts/*.eml` carry the presenter's address in `To:`, resolved by matching the
+`<week>/emls/*.eml` carry the presenter's address in `To:`, resolved by matching the
 Forms `PresenterChoice` value against `First name + Last name` in the roster. There is
 deliberately no `From:` header — Outlook fills in whichever account you drop the file into.
 

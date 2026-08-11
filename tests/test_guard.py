@@ -109,7 +109,7 @@ class TestArchive:
 
     def test_drafts_are_kept(self, archived):
         _, archive_dir = archived
-        assert list((archive_dir / "Output" / "W01" / "drafts").glob("*.eml"))
+        assert list((archive_dir / "Output" / "W01" / "emls").glob("*.eml"))
 
     def test_manifest_records_the_semester(self, archived):
         _, archive_dir = archived
