@@ -39,5 +39,5 @@ switch ($guardStatus) {
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-Write-Host "Done. Draft mails are under Output\drafts\<week>\ in the PeerGrading folder."
+Write-Host "Done. Draft mails are under Output\<week>\drafts\ in the PeerGrading folder."
 Write-Host "Drag the .eml files into Outlook Drafts, review them, then send."

@@ -109,25 +109,34 @@ latest submission. A presenter's weekly score is the mean across raters.
 
 ## Outputs
 
-- `weekly_status.csv` — one row per week in `week_windows.csv`, with `status` of `pending`,
-  `no_data` or `computed`. Start here.
-- `weekly_summary_<week>.csv` — per presenter: n_raters, mean/std/min/max, per-question means
-- `weekly_summary_ALL.csv` — the same across every week in the run
-- `peer_log_<week>.csv` — the deduped rater-level rows behind those numbers
-- `attendance_<week>.csv` — full roster joined against submissions, with a `submitted` flag
-- `mails/<week>/<Name>.txt` — feedback mail as plain text
-- `drafts/<week>/<Name>.eml` — the same mail, Outlook-importable
-- `unresolved_presenters.csv` — presenters whose name did not match the roster
-- `master/grade_edges.csv` — cumulative across runs, deduped on `ResponseId`
-- `master/grade_matrix_{count,mean}.csv` — rater × presenter matrices over all weeks
+Each week gets its own folder, so opening `W04` shows that week and nothing else:
 
-Every week whose window has opened gets a summary, log and attendance file even when
-nobody submitted: summary and log are headers only, attendance shows the whole roster at
-zero. An absent file means the tool never ran for that week, not that the week was empty.
+```
+Output/
+  weekly_status.csv          one row per week: pending / no_data / computed
+  weekly_summary_ALL.csv     every week's presenter summaries in one file
+  unresolved_presenters.csv  names that did not match the roster
+  W01/
+    summary.csv              per presenter: n_raters, mean/std/min/max, question means
+    peer_log.csv             the deduped rater-level rows behind those numbers
+    attendance.csv           the full roster, with a submitted flag
+    mails/<Name>.txt         feedback mail as plain text
+    drafts/<Name>.eml        the same mail, Outlook-importable
+  W02/ ...
+  master/
+    grade_edges.csv          cumulative across runs, deduped on ResponseId
+    grade_matrix_{count,mean}.csv    rater × presenter over all weeks
+```
+
+`weekly_status.csv` is the place to start — it says what happened to every week.
+
+Every week whose window has opened gets a folder, even when nobody submitted: `summary.csv`
+and `peer_log.csv` are headers only, `attendance.csv` shows the whole roster at zero, and
+there is no `mails/` or `drafts/`. A week with no folder at all has not started yet.
 
 ### Draft mails
 
-`drafts/<week>/*.eml` carry the presenter's address in `To:`, resolved by matching the
+`W<nn>/drafts/*.eml` carry the presenter's address in `To:`, resolved by matching the
 Forms `PresenterChoice` value against `First name + Last name` in the roster. There is
 deliberately no `From:` header — Outlook fills in whichever account you drop the file into.
 

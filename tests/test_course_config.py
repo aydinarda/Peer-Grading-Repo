@@ -27,7 +27,7 @@ def base_responses():
 
 
 def load_eml(root, name="Carlos_Diaz_Ruiz"):
-    path = root.outputs / "drafts" / "W01" / f"{name}.eml"
+    path = root.drafts("W01") / f"{name}.eml"
     return email.message_from_bytes(path.read_bytes(), policy=policy.default)
 
 
@@ -76,7 +76,7 @@ class TestRubricWeights:
     def test_changed_weights_change_the_score(self, artifact_dir, compute):
         root = make_root(artifact_dir / "PeerGrading", base_responses())
         compute(root.path)
-        before = pd.read_csv(root.outputs / "weekly_summary_W01.csv").iloc[0]["mean_score"]
+        before = pd.read_csv(root.week("W01") / "summary.csv").iloc[0]["mean_score"]
 
         # Everything on the general grade, nothing on the six statements.
         (root.inputs / "rubric.csv").write_text(
@@ -85,7 +85,7 @@ class TestRubricWeights:
             encoding="utf-8",
         )
         compute(root.path)
-        after = pd.read_csv(root.outputs / "weekly_summary_W01.csv").iloc[0]["mean_score"]
+        after = pd.read_csv(root.week("W01") / "summary.csv").iloc[0]["mean_score"]
 
         assert before == pytest.approx(4.0)
         assert after == pytest.approx(4.0)   # scores were uniform, so the mean holds
@@ -95,7 +95,7 @@ class TestRubricWeights:
                      {"Q2_1": 1, "Q2_2": 1, "Q2_3": 1, "Q3_1": 1, "Q3_2": 1, "Q3_3": 1, "Q4": 5}),
         ])
         compute(root.path)
-        q4_only = pd.read_csv(root.outputs / "weekly_summary_W01.csv").iloc[0]["mean_score"]
+        q4_only = pd.read_csv(root.week("W01") / "summary.csv").iloc[0]["mean_score"]
         assert q4_only == pytest.approx(5.0)
 
     def test_non_unit_weights_are_reported_and_rescale_the_maximum(self, artifact_dir, compute):
@@ -145,7 +145,7 @@ class TestRubricWeights:
         )
         (root.inputs / "rubric.csv").write_text(text, encoding="utf-8")
         compute(root.path)
-        assert pd.read_csv(root.outputs / "weekly_summary_W01.csv").iloc[0][
+        assert pd.read_csv(root.week("W01") / "summary.csv").iloc[0][
             "mean_score"] == pytest.approx(4.0)
 
 
@@ -197,7 +197,7 @@ class TestMailTemplate:
         )
         compute(root.path)
 
-        txt = (root.outputs / "mails" / "W01" / "Carlos_Diaz_Ruiz.txt").read_text(encoding="utf-8")
+        txt = (root.mails("W01") / "Carlos_Diaz_Ruiz.txt").read_text(encoding="utf-8")
         assert txt.startswith("Subject: Custom W01")
         assert txt.split("\n\n", 1)[1].strip() == load_eml(root).get_content().strip()
 

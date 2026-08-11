@@ -222,6 +222,16 @@ class DataRoot:
     def forms(self) -> Path:
         return self.inputs / "form_exports" / "forms_responses.xlsx"
 
+    def week(self, week_id: str) -> Path:
+        """The folder holding everything produced for one week."""
+        return self.outputs / week_id
+
+    def drafts(self, week_id: str) -> Path:
+        return self.week(week_id) / "drafts"
+
+    def mails(self, week_id: str) -> Path:
+        return self.week(week_id) / "mails"
+
     def rewrite_forms(self, responses: list[Response]) -> None:
         write_forms(self.forms, responses, self.windows)
 

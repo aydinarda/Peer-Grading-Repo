@@ -77,15 +77,15 @@ class TestWeekByWeek:
     def test_earlier_weeks_stay_frozen(self, semester, compute):
         """Recomputing after week 4 must not alter what week 1 said."""
         compute(semester.path)
-        w01_first = (semester.outputs / "weekly_summary_W01.csv").read_text()
-        drafts_first = sorted(p.name for p in (semester.outputs / "drafts" / "W01").glob("*.eml"))
+        w01_first = (semester.week("W01") / "summary.csv").read_text()
+        drafts_first = sorted(p.name for p in (semester.drafts("W01")).glob("*.eml"))
 
         for week in ("W02", "W03", "W04"):
             semester.rewrite_forms(cumulative_upto(semester.weeks, week))
             compute(semester.path)
 
-        assert (semester.outputs / "weekly_summary_W01.csv").read_text() == w01_first
-        assert sorted(p.name for p in (semester.outputs / "drafts" / "W01").glob("*.eml")) == drafts_first
+        assert (semester.week("W01") / "summary.csv").read_text() == w01_first
+        assert sorted(p.name for p in (semester.drafts("W01")).glob("*.eml")) == drafts_first
 
     def test_each_weeks_drafts_appear_in_their_own_folder(self, semester, compute):
         for week in ("W01", "W02", "W03", "W04"):
@@ -93,11 +93,11 @@ class TestWeekByWeek:
             compute(semester.path)
 
         counts = {
-            week: len(list((semester.outputs / "drafts" / week).glob("*.eml")))
+            week: len(list(semester.drafts(week).glob("*.eml")))
             for week in ("W01", "W02", "W04")
         }
         assert counts == {"W01": 2, "W02": 1, "W04": 2}
-        assert not (semester.outputs / "drafts" / "W03").exists()
+        assert not (semester.drafts("W03")).exists()
 
 
 class TestMasterAccumulation:
@@ -136,10 +136,10 @@ class TestMasterAccumulation:
     def test_attendance_counts_survive_a_rerun(self, semester, compute):
         semester.rewrite_forms(cumulative_upto(semester.weeks, "W01"))
         compute(semester.path)
-        first = pd.read_csv(semester.outputs / "attendance_W01.csv").set_index("StudentEmail")
+        first = pd.read_csv(semester.week("W01") / "attendance.csv").set_index("StudentEmail")
 
         compute(semester.path)
-        second = pd.read_csv(semester.outputs / "attendance_W01.csv").set_index("StudentEmail")
+        second = pd.read_csv(semester.week("W01") / "attendance.csv").set_index("StudentEmail")
 
         assert second.loc[ANA.email, "n_submissions"] == first.loc[ANA.email, "n_submissions"]
 
@@ -155,7 +155,7 @@ class TestDuplicateResponseIds:
         root = make_root(artifact_dir / "PeerGrading", responses)
         compute(root.path)
 
-        summary = pd.read_csv(root.outputs / "weekly_summary_W01.csv")
+        summary = pd.read_csv(root.week("W01") / "summary.csv")
         assert len(summary) == 2, "both presenters should appear despite the shared id"
 
     def test_reused_id_same_presenter_collapses_to_one(self, artifact_dir, compute):
@@ -166,6 +166,6 @@ class TestDuplicateResponseIds:
         root = make_root(artifact_dir / "PeerGrading", responses)
         compute(root.path)
 
-        summary = pd.read_csv(root.outputs / "weekly_summary_W01.csv")
+        summary = pd.read_csv(root.week("W01") / "summary.csv")
         assert summary.iloc[0]["n_raters"] == 1
         assert summary.iloc[0]["mean_score"] == pytest.approx(4.0)   # the later one wins

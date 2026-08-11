@@ -109,14 +109,14 @@ class TestArchive:
 
     def test_drafts_are_kept(self, archived):
         _, archive_dir = archived
-        assert list((archive_dir / "Output" / "drafts").rglob("*.eml"))
+        assert list((archive_dir / "Output" / "W01" / "drafts").glob("*.eml"))
 
     def test_manifest_records_the_semester(self, archived):
         _, archive_dir = archived
         manifest = (archive_dir / "MANIFEST.txt").read_text(encoding="utf-8")
         assert "semester_id: 2026-TEST" in manifest
         assert "Week-by-week status" in manifest
-        assert "weekly_summary_W01.csv" in manifest
+        assert "W01/summary.csv" in manifest
 
     def test_closure_notice_is_written(self, archived):
         _, archive_dir = archived

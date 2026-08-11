@@ -30,14 +30,14 @@ def basic_root(artifact_dir):
 class TestScoring:
     def test_weighted_formula(self, basic_root, compute):
         compute(basic_root.path)
-        summary = read(basic_root.outputs / "weekly_summary_W02.csv")
+        summary = read(basic_root.week("W02") / "summary.csv")
         row = summary.iloc[0]
         # 0.1*(1+2+3+4+5+4) + 0.4*2 = 1.9 + 0.8 = 2.7
         assert row["mean_score"] == pytest.approx(2.7)
 
     def test_mean_across_raters(self, basic_root, compute):
         compute(basic_root.path)
-        summary = read(basic_root.outputs / "weekly_summary_W01.csv")
+        summary = read(basic_root.week("W01") / "summary.csv")
         carlos = summary[summary["PresenterChoice"].str.contains("Carlos")].iloc[0]
         assert carlos["n_raters"] == 2
         assert carlos["mean_score"] == pytest.approx(4.0)   # (5.0 + 3.0) / 2
@@ -55,7 +55,7 @@ class TestScoring:
         df.to_excel(root.forms, index=False)
 
         compute(root.path)
-        summary = read(root.outputs / "weekly_summary_W01.csv")
+        summary = read(root.week("W01") / "summary.csv")
         assert summary.iloc[0]["n_raters"] == 1
 
 
@@ -68,13 +68,13 @@ class TestDeduplication:
         root = make_root(artifact_dir / "PeerGrading", responses)
         compute(root.path)
 
-        summary = read(root.outputs / "weekly_summary_W01.csv")
+        summary = read(root.week("W01") / "summary.csv")
         assert summary.iloc[0]["n_raters"] == 1
         assert summary.iloc[0]["mean_score"] == pytest.approx(5.0)
 
     def test_different_raters_both_count(self, basic_root, compute):
         compute(basic_root.path)
-        log = read(basic_root.outputs / "peer_log_W01.csv")
+        log = read(basic_root.week("W01") / "peer_log.csv")
         carlos_rows = log[log["PresenterChoice"].str.contains("Carlos")]
         assert set(carlos_rows["RaterEmail"]) == {ANA.email, BJORN.email}
 
@@ -88,7 +88,7 @@ class TestWeekAssignment:
         ]
         root = make_root(artifact_dir / "PeerGrading", responses)
         compute(root.path)
-        assert read(root.outputs / "weekly_summary_W01.csv").iloc[0]["n_raters"] == 1
+        assert read(root.week("W01") / "summary.csv").iloc[0]["n_raters"] == 1
 
     def test_unresolved_timestamp_is_dropped(self, artifact_dir, compute):
         """The real export contains a literal `utcNow()` that never resolved."""
@@ -98,7 +98,7 @@ class TestWeekAssignment:
         ]
         root = make_root(artifact_dir / "PeerGrading", responses)
         compute(root.path)
-        assert read(root.outputs / "weekly_summary_W01.csv").iloc[0]["n_raters"] == 1
+        assert read(root.week("W01") / "summary.csv").iloc[0]["n_raters"] == 1
 
 
 class TestWeeklyStatus:
@@ -129,29 +129,29 @@ class TestWeeklyStatus:
 class TestEmptyWeeks:
     def test_empty_week_files_exist_with_headers(self, basic_root, compute):
         compute(basic_root.path)
-        summary = read(basic_root.outputs / "weekly_summary_W03.csv")
+        summary = read(basic_root.week("W03") / "summary.csv")
         assert len(summary) == 0
         assert "mean_score" in summary.columns
 
-        log = read(basic_root.outputs / "peer_log_W03.csv")
+        log = read(basic_root.week("W03") / "peer_log.csv")
         assert len(log) == 0
 
     def test_empty_week_attendance_lists_whole_roster_at_zero(self, basic_root, compute):
         compute(basic_root.path)
-        att = read(basic_root.outputs / "attendance_W03.csv")
+        att = read(basic_root.week("W03") / "attendance.csv")
         assert len(att) == len(f.ROSTER)
         assert att["submitted"].sum() == 0
         assert att["n_submissions"].sum() == 0
 
     def test_pending_week_produces_no_files(self, basic_root, compute):
         compute(basic_root.path)
-        assert not (basic_root.outputs / "weekly_summary_W05.csv").exists()
-        assert not (basic_root.outputs / "attendance_W05.csv").exists()
+        assert not (basic_root.week("W05") / "summary.csv").exists()
+        assert not (basic_root.week("W05") / "attendance.csv").exists()
 
     def test_no_mail_folder_for_empty_week(self, basic_root, compute):
         compute(basic_root.path)
-        assert not (basic_root.outputs / "mails" / "W03").exists()
-        assert not (basic_root.outputs / "drafts" / "W03").exists()
+        assert not (basic_root.mails("W03")).exists()
+        assert not (basic_root.drafts("W03")).exists()
 
     def test_everything_empty_still_reports(self, artifact_dir, compute):
         """No grades at all anywhere is a result, not a crash."""
@@ -165,13 +165,13 @@ class TestEmptyWeeks:
 class TestAttendance:
     def test_submitters_are_marked(self, basic_root, compute):
         compute(basic_root.path)
-        att = read(basic_root.outputs / "attendance_W01.csv").set_index("StudentEmail")
+        att = read(basic_root.week("W01") / "attendance.csv").set_index("StudentEmail")
         assert att.loc[ANA.email, "submitted"] == 1
         assert att.loc[EMIL.email, "submitted"] == 0
 
     def test_roster_is_complete(self, basic_root, compute):
         compute(basic_root.path)
-        att = read(basic_root.outputs / "attendance_W01.csv")
+        att = read(basic_root.week("W01") / "attendance.csv")
         assert set(att["StudentEmail"]) == {s.email for s in f.ROSTER}
 
 
@@ -180,4 +180,4 @@ class TestWeekFilter:
         compute(basic_root.path, "--week", "W01")
         status = read(basic_root.outputs / "weekly_status.csv")
         assert list(status["week_id"]) == ["W01"]
-        assert not (basic_root.outputs / "weekly_summary_W02.csv").exists()
+        assert not (basic_root.week("W02") / "summary.csv").exists()

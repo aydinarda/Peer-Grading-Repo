@@ -78,7 +78,14 @@ def _walk(base: Path, depth: int):
 def prompt_for_root() -> Path | None:
     print("\nEnter the full path to the PeerGrading folder (or press Enter to give up).")
     print("On macOS you can drag the folder from Finder into this window.")
-    raw = input("Path: ").strip().strip("'\"")
+    try:
+        raw = input("Path: ").strip().strip("'\"")
+    except EOFError:
+        # No one is watching - a scheduled run, or a piped shell. Say what to do
+        # rather than dying with a traceback.
+        print("\nNot running interactively, so there is nobody to ask.")
+        print("Set PEERGRADING_ROOT, or run this script yourself from a terminal.")
+        return None
     if not raw:
         return None
     return Path(raw).expanduser()

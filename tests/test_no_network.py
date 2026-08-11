@@ -60,7 +60,7 @@ class TestOfflineOperation:
         root = make_root(artifact_dir / "PeerGrading", responses)
 
         assert _run_in_process("compute_weekly.py", root.path) == 0
-        assert (root.outputs / "drafts" / "W01" / "Carlos_Diaz_Ruiz.eml").exists()
+        assert (root.drafts("W01") / "Carlos_Diaz_Ruiz.eml").exists()
 
     def test_guard_needs_no_network(self, artifact_dir, no_network):
         responses = [Response(1, "W01", ANA, presenter_choice(CARLOS), uniform(4))]

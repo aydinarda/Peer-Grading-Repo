@@ -230,7 +230,6 @@ def main():
     deadline_map: Dict[str, pd.Timestamp] = {w.week_id: w.deadline_local for w in windows}
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "mails").mkdir(parents=True, exist_ok=True)
     master_dir = out_dir / "master"
     master_dir.mkdir(parents=True, exist_ok=True)
 
@@ -387,11 +386,16 @@ def main():
         status_row["status"] = "computed" if len(dfw_rows) else "no_data"
         status_rows.append(status_row)
 
+        # Everything for a week lives in its own folder, so opening W04 in
+        # SharePoint shows that week and nothing else.
+        week_dir = out_dir / week_id
+        week_dir.mkdir(parents=True, exist_ok=True)
+
         # Header-only files when the week is empty, so "no submissions" is
         # distinguishable from "never ran".
         summary.sort_values(
             ["mean_score", "n_raters"], ascending=[False, False]
-        ).to_csv(out_dir / f"weekly_summary_{week_id}.csv", index=False)
+        ).to_csv(week_dir / "summary.csv", index=False)
 
         if len(dfw_rows):
             dflog = dfw_rows.rename(columns={col_presenter: "PresenterChoice"}).copy()
@@ -399,15 +403,15 @@ def main():
             dflog = dflog[log_cols].copy()
         else:
             dflog = pd.DataFrame(columns=log_cols)
-        dflog.to_csv(out_dir / f"peer_log_{week_id}.csv", index=False)
+        dflog.to_csv(week_dir / "peer_log.csv", index=False)
 
         if not len(dfw_rows):
             continue
 
         # Mail drafts: .txt to read and archive, .eml to drag into Outlook.
-        mails_dir = out_dir / "mails" / week_id
+        mails_dir = week_dir / "mails"
         mails_dir.mkdir(parents=True, exist_ok=True)
-        drafts_dir = out_dir / "drafts" / week_id
+        drafts_dir = week_dir / "drafts"
         drafts_dir.mkdir(parents=True, exist_ok=True)
 
         for presenter, dfp in dfw_rows.rename(columns={col_presenter: "PresenterChoice"}).groupby("PresenterChoice"):
@@ -543,7 +547,9 @@ def main():
             )
             att = att.sort_values(["submitted", "n_submissions"], ascending=[True, False])
 
-            att.to_csv(out_dir / f"attendance_{week_id}.csv", index=False)
+            week_dir = out_dir / week_id
+            week_dir.mkdir(parents=True, exist_ok=True)
+            att.to_csv(week_dir / "attendance.csv", index=False)
 
         # Master attendance snapshot (latest)
         # (istersen burada ayrıca toplam submit sayısı vs da ekleyebiliriz)
